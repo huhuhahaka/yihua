@@ -33,13 +33,13 @@ jobs:
               with:
                   node-version: 24 # 明确指定 Node 24
                   cache: 'pnpm' # 启用 pnpm 缓存
-                  registry-url: 'https://registry.npmmirror.com' # 可选：使用国内镜像加速
+                  registry-url: 'https://registry.npmmirror.com' # 国内镜像加速（可选）
 
-            - name: Enable Corepack (管理包管理器)
+            - name: Enable Corepack (Node 官方包管理器管理工具)
               run: |
-                  # 确保 Corepack 启用（Node 16+ 内置）
+                  # 启用 Corepack（Node 16+ 内置）
                   corepack enable
-                  # 使用 pnpm 作为默认包管理器
+                  # 激活 pnpm 11.5.1 作为默认包管理器
                   corepack prepare pnpm@11.5.1 --activate
 
             - name: Install Rust stable
@@ -59,16 +59,6 @@ jobs:
               uses: tauri-apps/tauri-action@v0
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                  # macOS 签名与公证（可选）
-                  # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-                  # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-                  # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-                  # APPLE_ID: ${{ secrets.APPLE_ID }}
-                  # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-                  # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-                  # Windows 签名（可选）
-                  # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-                  # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
               with:
                   tagName: ${{ github.ref_name }}
                   releaseName: 'yihua ${{ github.ref_name }}'
