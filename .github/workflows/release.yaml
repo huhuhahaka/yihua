@@ -10,7 +10,7 @@ permissions:
     contents: write
 
 jobs:
-    release:
+    build:
         strategy:
             fail-fast: false
             matrix:
@@ -61,14 +61,54 @@ jobs:
             - name: Install frontend dependencies
               run: pnpm install --frozen-lockfile
 
-            - name: Build and Release Tauri App
+            - name: Build Tauri App
               uses: tauri-apps/tauri-action@v0
+              id: tauri-build
+              with:
+                  args: ${{ matrix.target != '' && format('--target {0}', matrix.target) || '' }}
+
+            - name: Upload build artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: tauri-${{ matrix.platform }}-${{ matrix.target || 'default' }}
+                  path: ${{ steps.tauri-build.outputs.artifactPaths }}
+                  retention-days: 7
+
+    publish:
+        needs: build
+        runs-on: ubuntu-latest
+        steps:
+            - name: Download all artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  pattern: tauri-*
+                  path: artifacts
+                  merge-multiple: true
+
+            # ✅ 关键修复：将嵌套目录中的文件扁平化到 artifacts 根目录
+            - name: Flatten artifacts
+              run: |
+                  find artifacts -mindepth 2 -type f -exec mv {} artifacts/ \;
+                  find artifacts -mindepth 1 -type d -empty -delete
+                  echo "=== Final artifact list ==="
+                  ls -la artifacts/
+
+            - name: Create GitHub Release
+              uses: softprops/action-gh-release@v2
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               with:
-                  tagName: ${{ github.ref_name }}
-                  releaseName: 'Yihua ${{ github.ref_name }}'
-                  releaseBody: 'See the assets to download this version and install.'
-                  releaseDraft: true
+                  tag_name: ${{ github.ref_name }}
+                  name: 'Yihua ${{ github.ref_name }}'
+                  body: 'See the assets to download this version and install.'
+                  draft: true
                   prerelease: false
-                  args: ${{ matrix.target != '' && format('--target {0}', matrix.target) || '' }}
+                  files: |
+                      artifacts/*.dmg
+                      artifacts/*.msi
+                      artifacts/*.exe
+                      artifacts/*.deb
+                      artifacts/*.AppImage
+                      artifacts/*.rpm
+                      artifacts/*.tar.gz
+                      artifacts/*.zip
