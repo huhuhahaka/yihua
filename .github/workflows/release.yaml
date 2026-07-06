@@ -1,235 +1,76 @@
-name: Release Multi-platform Build
+name: Release
 
 on:
     push:
         tags:
-            - 'v*'
-    workflow_dispatch:
-        inputs:
-            version:
-                description: 'Version number (e.g., 1.0.0)'
-                required: true
-                type: string
-            platforms:
-                description: 'Target platforms (comma-separated)'
-                required: false
-                type: string
-                default: 'all'
+            - 'v*' # 当推送以 v 开头的 tag 时触发，例如 v0.1.0
+    workflow_dispatch: # 也支持手动触发
 
 jobs:
     build:
-        runs-on: ${{ matrix.os }}
         strategy:
+            fail-fast: false
             matrix:
-                os: [ubuntu-latest, windows-latest, macos-latest]
                 include:
-                    - os: ubuntu-latest
-                      target-x86_64: x86_64-unknown-linux-gnu
-                      artifact: 'yihua-linux-x64'
-                      binary-name: 'yihua'
-                    - os: windows-latest
-                      target-x86_64: x86_64-pc-windows-msvc
-                      target-aarch64: aarch64-pc-windows-msvc
-                      artifact: 'yihua-windows-x64'
-                      artifact-arm64: 'yihua-windows-arm64'
-                      binary-name: 'yihua.exe'
-                    - os: macos-latest
-                      target-x86_64: x86_64-apple-darwin
-                      target-aarch64: aarch64-apple-darwin
-                      artifact: 'yihua-macos-x64'
-                      artifact-arm64: 'yihua-macos-arm64'
-                      binary-name: 'yihua'
+                    # macOS Apple Silicon (M1/M2...)
+                    - platform: macos-latest
+                      args: '--target aarch64-apple-darwin'
+                    # macOS Intel
+                    - platform: macos-latest
+                      args: '--target x86_64-apple-darwin'
+                    # Windows
+                    - platform: windows-latest
+                      args: ''
+
+        runs-on: ${{ matrix.platform }}
 
         steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-              with:
-                  submodules: recursive
-
-            - name: Setup Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: '22'  # 明确指定 Node.js 22（当前 LTS）
-                  cache: 'pnpm'
-                  cache-dependency-path: pnpm-lock.yaml
-
-            - name: Install pnpm (使用官方 action 确保正确安装)
-              uses: pnpm/action-setup@v2
-              with:
-                  version: 8  # 明确指定 pnpm 版本
-
-            - name: Install dependencies
-              run: pnpm install --frozen-lockfile
-
-            - name: Build frontend
-              run: pnpm build
-
-            - name: Build Tauri App (x86_64)
-              run: |
-                  cd src-tauri
-                  cargo tauri build --target ${{ matrix.target-x86_64 }} --release
-              env:
-                  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-                  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_PRIVATE_KEY_PASSWORD }}
-
-            - name: Build Tauri App (ARM64) - Windows
-              if: matrix.os == 'windows-latest' && matrix.target-aarch64
-              run: |
-                  cd src-tauri
-                  cargo tauri build --target ${{ matrix.target-aarch64 }} --release
-              env:
-                  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-                  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_PRIVATE_KEY_PASSWORD }}
-
-            - name: Build Tauri App (ARM64) - macOS
-              if: matrix.os == 'macos-latest' && matrix.target-aarch64
-              run: |
-                  cd src-tauri
-                  cargo tauri build --target ${{ matrix.target-aarch64 }} --release
-                  # Notarize for macOS
-                  if [ -n "${{ secrets.APPLE_ID }}" ] && [ -n "${{ secrets.APPLE_ID_PASSWORD }}" ]; then
-                    npx @tauri-apps/cli notarize \
-                      --path ./target/${{ matrix.target-aarch64 }}/release/bundle/dmg/yihua.dmg \
-                      --apple-id "${{ secrets.APPLE_ID }}" \
-                      --password "${{ secrets.APPLE_ID_PASSWORD }}"
-                  fi
-              env:
-                  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-                  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_PRIVATE_KEY_PASSWORD }}
-
-            - name: Upload x64 Artifact
-              uses: actions/upload-artifact@v4
-              with:
-                  name: ${{ matrix.artifact }}
-                  path: src-tauri/target/${{ matrix.target-x86_64 }}/release/bundle/
-
-            - name: Upload ARM64 Artifact (Windows)
-              if: matrix.os == 'windows-latest' && matrix.target-aarch64
-              uses: actions/upload-artifact@v4
-              with:
-                  name: ${{ matrix.artifact-arm64 }}
-                  path: src-tauri/target/${{ matrix.target-aarch64 }}/release/bundle/
-
-            - name: Upload ARM64 Artifact (macOS)
-              if: matrix.os == 'macos-latest' && matrix.target-aarch64
-              uses: actions/upload-artifact@v4
-              with:
-                  name: ${{ matrix.artifact-arm64 }}
-                  path: src-tauri/target/${{ matrix.target-aarch64 }}/release/bundle/
-
-    create-release:
-        needs: build
-        runs-on: ubuntu-latest
-        if: startsWith(github.ref, 'refs/tags/v')
-
-        steps:
-            - name: Download all artifacts
-              uses: actions/download-artifact@v4
-              with:
-                  path: dist/
-
-            - name: Create Release
-              uses: softprops/action-gh-release@v2
-              with:
-                  tag_name: ${{ github.ref_name }}
-                  name: Release ${{ github.ref_name }}
-                  body: |
-                      ## Release ${{ github.ref_name }}
-
-                      ### Changes
-                      - Automated release build
-
-                      ### Downloads
-                      - **Linux x64**: [yihua-linux-x64.tar.gz](dist/yihua-linux-x64/**/*.tar.gz)
-                      - **Windows x64**: [yihua-windows-x64.zip](dist/yihua-windows-x64/**/*.zip)
-                      - **Windows ARM64**: [yihua-windows-arm64.zip](dist/yihua-windows-arm64/**/*.zip)
-                      - **macOS x64**: [yihua-macos-x64.tar.gz](dist/yihua-macos-x64/**/*.tar.gz)
-                      - **macOS ARM64**: [yihua-macos-arm64.tar.gz](dist/yihua-macos-arm64/**/*.tar.gz)
-                  draft: false
-                  prerelease: false
-                  generate_release_notes: true
-                  files: |
-                      dist/yihua-linux-x64/**
-                      dist/yihua-windows-x64/**
-                      dist/yihua-windows-arm64/**
-                      dist/yihua-macos-x64/**
-                      dist/yihua-macos-arm64/**
-
-    build-web:
-        runs-on: ubuntu-latest
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-
-        steps:
-            - name: Checkout code
+            - name: Checkout repository
               uses: actions/checkout@v4
 
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
-                  node-version: '22'  # 统一 Node.js 版本
-                  cache: 'pnpm'
-                  cache-dependency-path: pnpm-lock.yaml
+                  node-version: 24 # 与您的本地环境一致
 
             - name: Install pnpm
-              uses: pnpm/action-setup@v2
+              uses: pnpm/action-setup@v4
               with:
-                  version: 8
+                  version: 11.5.1 # 与您的本地环境一致
 
-            - name: Install dependencies
-              run: pnpm install --frozen-lockfile
-
-            - name: Build frontend
-              run: pnpm build
-
-            - name: Upload Web Build
-              uses: actions/upload-artifact@v4
+            - name: Install Rust stable
+              uses: dtolnay/rust-toolchain@stable
               with:
-                  name: yihua-web
-                  path: dist/
+                  # macOS 下同时安装两个架构的 target
+                  targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
-            - name: Deploy to GitHub Pages (only on tags)
-              if: startsWith(github.ref, 'refs/tags/v')
-              uses: peaceiris/actions-gh-pages@v3
+            - name: Rust cache
+              uses: swatinem/rust-cache@v2
               with:
-                  github_token: ${{ secrets.GITHUB_TOKEN }}
-                  publish_dir: ./dist
-                  cname: ${{ secrets.CNAME || '' }}
+                  workspaces: './src-tauri -> target'
 
-    # Mobile builds (optional - requires additional setup)
-    build-mobile:
-        runs-on: ubuntu-latest
-        if: github.event_name == 'workflow_dispatch'
-        needs: build
+            - name: Install frontend dependencies
+              run: pnpm install
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Setup Flutter (for mobile builds)
-              uses: subosito/flutter-action@v2
+            - name: Build and release Tauri app
+              uses: tauri-apps/tauri-action@v0
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  # 如果需要代码签名和公证，请取消注释并配置以下环境变量
+                  # macOS 签名与公证
+                  # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+                  # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+                  # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+                  # APPLE_ID: ${{ secrets.APPLE_ID }}
+                  # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+                  # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+                  # Windows 签名
+                  # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+                  # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
               with:
-                  channel: 'stable'
-
-            - name: Install dependencies
-              run: |
-                  flutter pub get
-                  cd src-tauri
-                  cargo install tauri-cli --version 2.0.0
-
-            - name: Build Android
-              run: |
-                  flutter build apk --split-per-abi
-              if: github.event.inputs.platforms == 'android' || github.event.inputs.platforms == 'all'
-
-            - name: Build iOS
-              run: |
-                  flutter build ios --no-codesign
-              if: github.event.inputs.platforms == 'ios' || github.event.inputs.platforms == 'all'
-
-            - name: Upload Mobile Artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: mobile-builds
-                  path: |
-                      build/app/outputs/flutter-apk/
-                      build/ios/archive/
+                  tagName: ${{ github.ref_name }}
+                  releaseName: 'yihua ${{ github.ref_name }}'
+                  releaseBody: 'See the assets to download this version and install.'
+                  releaseDraft: true
+                  prerelease: false
+                  args: ${{ matrix.args }}
