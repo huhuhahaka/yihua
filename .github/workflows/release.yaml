@@ -31,17 +31,17 @@ jobs:
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
-                  node-version: 24 # 与您的本地环境一致
+                  node-version: 24 # 明确指定Node 24
+                  cache: 'pnpm' # 启用pnpm缓存
 
             - name: Install pnpm
               uses: pnpm/action-setup@v4
               with:
-                  version: 11.5.1 # 与您的本地环境一致
+                  version: 11.5.1 # 明确指定pnpm 11.5.1
 
             - name: Install Rust stable
               uses: dtolnay/rust-toolchain@stable
               with:
-                  # macOS 下同时安装两个架构的 target
                   targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
             - name: Rust cache
@@ -56,15 +56,14 @@ jobs:
               uses: tauri-apps/tauri-action@v0
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                  # 如果需要代码签名和公证，请取消注释并配置以下环境变量
-                  # macOS 签名与公证
+                  # macOS 签名与公证（可选）
                   # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
                   # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
                   # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
                   # APPLE_ID: ${{ secrets.APPLE_ID }}
                   # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
                   # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-                  # Windows 签名
+                  # Windows 签名（可选）
                   # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
                   # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
               with:
