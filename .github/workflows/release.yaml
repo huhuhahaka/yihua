@@ -74,6 +74,22 @@ jobs:
                   path: ${{ steps.tauri-build.outputs.artifactPaths }}
                   retention-days: 7
 
+            - name: Debug tauri build outputs
+              if: always()
+              run: |
+                  echo "=== tauri action artifactPaths ==="
+                  echo '${{ steps.tauri-build.outputs.artifactPaths }}'
+                  # 如果 artifactPaths 非空，尝试列出这些路径下的文件以便调试
+                  if [ -n "${{ steps.tauri-build.outputs.artifactPaths }}" ]; then
+                    # 逐个路径输出文件清单（路径中可能包含空格，此处按空格分割）
+                    for p in ${{ steps.tauri-build.outputs.artifactPaths }}; do
+                      echo "Listing for: $p"
+                      ls -la "$p" || true
+                    done
+                  else
+                    echo "No artifactPaths output from tauri build action for this matrix entry."
+                  fi
+
     publish:
         needs: build
         runs-on: ubuntu-latest
@@ -84,12 +100,29 @@ jobs:
                   pattern: tauri-*
                   path: artifacts
                   merge-multiple: true
+                  if-no-files-found: warn
 
-            # ✅ 关键修复：将嵌套目录中的文件扁平化到 artifacts 根目录
             - name: Flatten artifacts
               run: |
-                  find artifacts -mindepth 2 -type f -exec mv {} artifacts/ \;
-                  find artifacts -mindepth 1 -type d -empty -delete
+                  # 确保 artifacts 目录存在，避免 find/ls 报错
+                  mkdir -p artifacts
+
+                  echo "=== Downloaded artifacts root (before flatten) ==="
+                  ls -la artifacts || true
+
+                  # 如果目录为空，给出明确错误并退出
+                  if [ -z "$(ls -A artifacts 2>/dev/null)" ]; then
+                    echo "::error::No artifacts were downloaded into artifacts/. Check the build job and upload-artifact step and the tauri-action outputs."
+                    echo "当前 artifacts 目录 listing:"
+                    ls -la artifacts || true
+                    exit 1
+                  fi
+
+                  # 将嵌套目录中的文件移动到 artifacts 根目录（使用 -n 避免覆盖）
+                  find artifacts -mindepth 2 -type f -exec mv -n {} artifacts/ \; || true
+                  # 删除空目录
+                  find artifacts -mindepth 1 -type d -empty -delete || true
+
                   echo "=== Final artifact list ==="
                   ls -la artifacts/
 
