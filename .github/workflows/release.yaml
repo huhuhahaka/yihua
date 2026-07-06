@@ -67,39 +67,20 @@ jobs:
               with:
                   args: ${{ matrix.target != '' && format('--target {0}', matrix.target) || '' }}
 
-            - name: Debug tauri build outputs
-              if: always()
-                # 强制使用 bash，避免 windows runner 使用 PowerShell 导致 POSIX 语法报错
-              shell: bash
-              run: |
-                  echo "=== tauri action artifactPaths (raw) ==="
-                  echo '${{ steps.tauri-build.outputs.artifactPaths }}'
-                  artifact_paths='${{ steps.tauri-build.outputs.artifactPaths }}'
-
-                  if [ -n "$artifact_paths" ]; then
-                    # 如果 artifactPaths 是 JSON 数组字符串，尝试按行打印每个路径（兼容有换行或空格的路径）
-                    # 在 bash 中把 JSON array 转换为行可以用 jq，但为了兼容 runner 不预装 jq，我们做两种处理：
-                    # 1) 如果看起来像 ["a","b"] 这种形式，用 github expression 已在上传时处理；
-                    # 2) 这里尝试简单地去掉前后方括号/引号并按逗号分割打印，作为辅助查看（仅用于 debug，不影响上传）
-                    echo "Attempting to pretty-print artifact paths for debug:"
-                    # remove leading/trailing brackets
-                    trimmed=$(echo "$artifact_paths" | sed 's/^\s*\[\s*//; s/\s*\]\s*$//')
-                    # replace "," with newline, remove surrounding quotes
-                    echo "$trimmed" | sed 's/\",\"/\",\"/g' | sed 's/\",\"/\\n/g' | sed 's/^"//; s/"$//' | tr ',' '\n' | sed 's/^"//; s/"$//' | while IFS= read -r p || [ -n "$p" ]; do
-                      p_trim=$(echo "$p" | sed 's/^"//; s/"$//')
-                      [ -n "$p_trim" ] && echo "Listing for: $p_trim" && ls -la "$p_trim" || true
-                    done
-                  else
-                    echo "No artifactPaths output from tauri build action for this matrix entry."
-                  fi
-
             - name: Upload build artifacts
-              if: ${{ steps.tauri-build.outputs.artifactPaths != '' }}
               uses: actions/upload-artifact@v4
               with:
                   name: tauri-${{ matrix.platform }}-${{ matrix.target || 'default' }}
-                  # 将 artifactPaths 的 JSON 字符串解析为数组并用换行连接，upload-artifact 能识别多行路径
-                  path: ${{ join(fromJson(steps.tauri-build.outputs.artifactPaths), '\n') }}
+                  # 使用通配符匹配所有可能的构建目标路径，兼容 Windows/macOS/Linux
+                  path: |
+                      src-tauri/target/**/release/bundle/**/*.msi
+                      src-tauri/target/**/release/bundle/**/*.exe
+                      src-tauri/target/**/release/bundle/**/*.dmg
+                      src-tauri/target/**/release/bundle/**/*.deb
+                      src-tauri/target/**/release/bundle/**/*.AppImage
+                      src-tauri/target/**/release/bundle/**/*.rpm
+                      src-tauri/target/**/release/bundle/**/*.tar.gz
+                      src-tauri/target/**/release/bundle/**/*.zip
                   retention-days: 7
 
     publish:
