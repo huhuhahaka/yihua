@@ -1,26 +1,26 @@
-name: Release
+name: Release Build
 
 on:
     push:
         tags:
-            - 'v*' # 当推送以 v 开头的 tag 时触发，例如 v0.1.0
-    workflow_dispatch: # 也支持手动触发
+            - 'v*'
+    workflow_dispatch:
+
+permissions:
+    contents: write
 
 jobs:
-    build:
+    release:
         strategy:
             fail-fast: false
             matrix:
                 include:
-                    # macOS Apple Silicon (M1/M2...)
                     - platform: macos-latest
-                      args: '--target aarch64-apple-darwin'
-                    # macOS Intel
-                    - platform: macos-latest
-                      args: '--target x86_64-apple-darwin'
-                    # Windows
+                      target: aarch64-apple-darwin,x86_64-apple-darwin
+                    - platform: ubuntu-24.04
+                      target: ''
                     - platform: windows-latest
-                      args: ''
+                      target: ''
 
         runs-on: ${{ matrix.platform }}
 
@@ -28,42 +28,50 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v4
 
+            # 安装 pnpm 并匹配您本地的 v11.5.1
+            - name: Setup pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: 11.5.1
+
+            # 设置 Node.js 环境，匹配您本地的 v24.16.0
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
-                  node-version: 24 # 明确指定 Node 24
-                  cache: 'pnpm' # 启用 pnpm 缓存（加速依赖安装）
+                  node-version: '24.16.0'
+                  cache: 'pnpm'
 
-            - name: Install pnpm globally via npm
-              run: npm install -g pnpm@11.5.1
-                # 说明：通过 npm 全局安装 pnpm，确保版本与本地一致
-
-            - name: Add pnpm to PATH
-              run: echo "$HOME/.npm-global/bin" >> $GITHUB_PATH
-                # 说明：将 pnpm 的安装路径（~/.npm-global/bin）添加到环境变量 PATH 中
-
+            # 安装 Rust 工具链
             - name: Install Rust stable
               uses: dtolnay/rust-toolchain@stable
               with:
-                  targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+                  targets: ${{ matrix.target }}
 
-            - name: Rust cache
-              uses: swatinem/rust-cache@v2
-              with:
-                  workspaces: './src-tauri -> target'
+            # Linux 平台需要安装 Tauri 2 所需的系统依赖
+            - name: Install Linux dependencies
+              if: matrix.platform == 'ubuntu-24.04'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y \
+                    pkg-config libclang-dev libxcb1-dev libxrandr-dev \
+                    libdbus-1-dev libpipewire-0.3-dev libwayland-dev \
+                    libegl-dev libglib2.0-dev libgtk-3-dev \
+                    libwebkit2gtk-4.1-dev libgbm-dev libjavascriptcoregtk-4.1-dev \
+                    libsoup-3.0-dev libappindicator3-dev librsvg2-dev patchelf
 
+            # 安装项目依赖
             - name: Install frontend dependencies
-              run: pnpm install
-                # 此时 pnpm 已在 PATH 中，可直接执行
+              run: pnpm install --frozen-lockfile
 
-            - name: Build and release Tauri app
+            # 执行 Tauri 构建并发布到 GitHub Releases
+            - name: Build and Release Tauri App
               uses: tauri-apps/tauri-action@v0
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               with:
                   tagName: ${{ github.ref_name }}
-                  releaseName: 'yihua ${{ github.ref_name }}'
+                  releaseName: 'Yihua ${{ github.ref_name }}'
                   releaseBody: 'See the assets to download this version and install.'
                   releaseDraft: true
                   prerelease: false
-                  args: ${{ matrix.args }}
+                  args: ${{ matrix.target != '' && format('--target {0}', matrix.target) || '' }}
