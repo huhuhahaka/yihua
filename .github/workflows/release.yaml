@@ -31,13 +31,16 @@ jobs:
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
-                  node-version: 24 # 明确指定Node 24
-                  cache: 'pnpm' # 启用pnpm缓存
+                  node-version: 24 # 明确指定 Node 24
+                  cache: 'pnpm' # 启用 pnpm 缓存
+                  registry-url: 'https://registry.npmmirror.com' # 可选：使用国内镜像加速
 
-            - name: Install pnpm
-              uses: pnpm/action-setup@v4
-              with:
-                  version: 11.5.1 # 明确指定pnpm 11.5.1
+            - name: Enable Corepack (管理包管理器)
+              run: |
+                  # 确保 Corepack 启用（Node 16+ 内置）
+                  corepack enable
+                  # 使用 pnpm 作为默认包管理器
+                  corepack prepare pnpm@11.5.1 --activate
 
             - name: Install Rust stable
               uses: dtolnay/rust-toolchain@stable
