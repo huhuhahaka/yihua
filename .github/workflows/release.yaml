@@ -1,0 +1,171 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - 'v*'
+    workflow_dispatch:
+
+jobs:
+    release:
+        permissions:
+            contents: write
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - platform: macos-latest
+                      target: aarch64-apple-darwin
+                      args: '--target aarch64-apple-darwin'
+                    - platform: macos-latest
+                      target: x86_64-apple-darwin
+                      args: '--target x86_64-apple-darwin'
+                    - platform: ubuntu-22.04
+                      target: x86_64-unknown-linux-gnu
+                      args: '--target x86_64-unknown-linux-gnu'
+                    - platform: windows-latest
+                      target: x86_64-pc-windows-msvc
+                      args: '--target x86_64-pc-windows-msvc'
+        runs-on: ${{ matrix.platform }}
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'pnpm'
+                  cache-dependency-path: pnpm-lock.yaml
+
+            - name: Install pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: 9
+                  run-install: true
+
+            - name: Install frontend dependencies
+              run: pnpm install
+
+            - name: Setup Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: ${{ matrix.target }}
+                  toolchain: '1.75.0'
+
+            - name: Rust cache
+              uses: swatinem/rust-cache@v2
+              with:
+                  workspaces: './src-tauri -> target'
+                  cache-directories: |
+                    target
+                    ~/.cargo
+
+            - name: Install Linux dependencies
+              if: matrix.platform == 'ubuntu-22.04'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y \
+                      libwebkit2gtk-4.1-dev \
+                      libappindicator3-dev \
+                      librsvg2-dev \
+                      patchelf \
+                      libgtk-3-dev \
+                      libayatana-appindicator3-dev \
+                      libdbus-1-dev \
+                      libssl-dev
+
+            - name: Install Windows dependencies
+              if: matrix.platform == 'windows-latest'
+              run: |
+                  choco install webview2-runtime --no-progress
+                  choco install dotnet-sdk --no-progress
+                  refreshenv
+
+            - name: Build Tauri App
+              run: pnpm tauri build --release ${{ matrix.args }}
+
+            - name: Upload Artifacts
+              uses: actions/upload-artifact@v3
+              with:
+                  name: ${{ matrix.platform }}-release
+                  path: |
+                    src-tauri/target/${{ matrix.target }}/release/*
+                    !src-tauri/target/${{ matrix.target }}/release/*.d
+                  retention-days: 30
+
+            - name: Release
+              if: success()
+              uses: tauri-apps/tauri-action@v0
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+                  # Apple signing (optional - uncomment and configure secrets when needed)
+                  # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+                  # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+                  # APPLE_ID: ${{ secrets.APPLE_ID }}
+                  # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+                  # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+                  # Tauri updater signing (optional - uncomment and configure secrets when needed)
+                  # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+                  # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+              with:
+                  tagName: ${{ github.ref_name }}
+                  releaseName: 'App ${{ github.ref_name }}'
+                  releaseBody: 'Release ${{ github.ref_name }}'
+                  releaseDraft: false
+                  prerelease: false
+                  args: ${{ matrix.args }}
+
+    # Optional: Add changelog generation job
+    changelog:
+        permissions:
+            contents: read
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Generate Changelog
+              if: startsWith(github.ref, 'refs/tags/v')
+              id: changelog
+              uses: actions/github-script@v6
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const path = './CHANGELOG.md';
+                      let changelog = '';
+                      if (fs.existsSync(path)) {
+                          changelog = fs.readFileSync(path, 'utf8');
+                      }
+                      return changelog;
+                  result-encoding: string
+
+            - name: Update Release Body
+              if: startsWith(github.ref, 'refs/tags/v')
+              uses: actions/github-script@v6
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const path = './CHANGELOG.md';
+                      let changelog = '';
+                      if (fs.existsSync(path)) {
+                          changelog = fs.readFileSync(path, 'utf8');
+                      }
+                      const releases = await github.rest.repos.listReleases({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo
+                      });
+                      const currentRelease = releases.data.find(r => r.tag_name === context.ref.replace('refs/tags/', ''));
+                      if (currentRelease && changelog) {
+                          await github.rest.repos.updateRelease({
+                              owner: context.repo.owner,
+                              repo: context.repo.repo,
+                              release_id: currentRelease.id,
+                              body: changelog
+                          });
+                      }
