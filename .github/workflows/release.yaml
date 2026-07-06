@@ -76,16 +76,28 @@ jobs:
 
             - name: Debug tauri build outputs
               if: always()
+                # 强制使用 bash，避免 windows runner 使用 PowerShell 导致 POSIX 语法报错
+              shell: bash
               run: |
                   echo "=== tauri action artifactPaths ==="
                   echo '${{ steps.tauri-build.outputs.artifactPaths }}'
-                  # 如果 artifactPaths 非空，尝试列出这些路径下的文件以便调试
-                  if [ -n "${{ steps.tauri-build.outputs.artifactPaths }}" ]; then
-                    # 逐个路径输出文件清单（路径中可能包含空格，此处按空格分割）
-                    for p in ${{ steps.tauri-build.outputs.artifactPaths }}; do
-                      echo "Listing for: $p"
-                      ls -la "$p" || true
-                    done
+
+                  artifact_paths='${{ steps.tauri-build.outputs.artifactPaths }}'
+
+                  if [ -n "$artifact_paths" ]; then
+                    # 如果包含换行，则按行遍历（这样可以保留路径中的空格）
+                    if printf '%s' "$artifact_paths" | grep -q $'\n'; then
+                      while IFS= read -r p || [ -n "$p" ]; do
+                        echo "Listing for: $p"
+                        ls -la "$p" || true
+                      done <<< "$artifact_paths"
+                    else
+                      # 否则回退为按空白分割（兼容以空格分隔的输出）
+                      for p in $artifact_paths; do
+                        echo "Listing for: $p"
+                        ls -la "$p" || true
+                      done
+                    fi
                   else
                     echo "No artifactPaths output from tauri build action for this matrix entry."
                   fi
